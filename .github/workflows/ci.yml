@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          pip install -r services/user-service/requirements.txt
+          pip install -r services/product-service/requirements.txt
+          pip install -r services/order-service/requirements.txt
+
+      - name: Run FastAPI tests
+        run: |
+          pytest services/user-service/tests services/product-service/tests services/order-service/tests -q

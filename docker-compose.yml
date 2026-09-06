@@ -1,0 +1,91 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cloud-platform-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-appdb}
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apppass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser} -d ${POSTGRES_DB:-appdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.1
+    container_name: cloud-platform-keycloak
+    command: start-dev --http-port=8081 --db=postgres --db-url=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-appdb} --db-username=${POSTGRES_USER:-appuser} --db-password=${POSTGRES_PASSWORD:-apppass}
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  user-service:
+    build:
+      context: ./services/user-service
+    container_name: cloud-platform-user-service
+    environment:
+      PORT: 8001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppass}@postgres:5432/${POSTGRES_DB:-appdb}
+      APP_NAME: user-service
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  product-service:
+    build:
+      context: ./services/product-service
+    container_name: cloud-platform-product-service
+    environment:
+      PORT: 8002
+      DATABASE_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppass}@postgres:5432/${POSTGRES_DB:-appdb}
+      APP_NAME: product-service
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  order-service:
+    build:
+      context: ./services/order-service
+    container_name: cloud-platform-order-service
+    environment:
+      PORT: 8003
+      USER_SERVICE_URL: http://user-service:8001
+      PRODUCT_SERVICE_URL: http://product-service:8002
+      DATABASE_URL: postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppass}@postgres:5432/${POSTGRES_DB:-appdb}
+      APP_NAME: order-service
+    ports:
+      - "8003:8003"
+    depends_on:
+      - user-service
+      - product-service
+      - postgres
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: cloud-platform-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+
+volumes:
+  postgres_data:

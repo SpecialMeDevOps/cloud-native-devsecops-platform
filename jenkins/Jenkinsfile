@@ -1,0 +1,40 @@
+pipeline {
+  agent any
+
+  environment {
+    IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_ID}"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        echo 'Checking out source'
+        checkout scm
+      }
+    }
+
+    stage('Build & Test') {
+      steps {
+        sh 'python -m pytest services/user-service/tests services/product-service/tests services/order-service/tests -q'
+      }
+    }
+
+    stage('Security Scan') {
+      steps {
+        echo 'Placeholder for Trivy/SonarQube scan'
+      }
+    }
+
+    stage('Package') {
+      steps {
+        echo 'Build Docker images and push to ECR'
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        echo 'Update GitOps manifests and trigger ArgoCD sync'
+      }
+    }
+  }
+}
