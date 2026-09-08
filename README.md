@@ -33,6 +33,145 @@ Then open:
 - Order Service: http://localhost:8003/docs
 - Keycloak: http://localhost:8081
 
+## How to apply this project step by step
+
+Use the project in this order so the stack can be started safely and predictably:
+
+### 1. Start the local application stack
+
+This is the quickest way to test the full repo locally before you deploy to AWS or Kubernetes.
+
+```bash
+docker compose up --build
+```
+
+Verify the stack:
+
+```bash
+docker compose ps
+curl http://localhost:8080
+curl http://localhost:8001/health
+curl http://localhost:8002/health
+curl http://localhost:8003/health
+```
+
+To stop everything:
+
+```bash
+docker compose down -v
+```
+
+### 2. Apply the Kubernetes manifests
+
+For a cluster deployment, apply the namespace and application resources in order:
+
+```bash
+kubectl apply -f k8s-manifests/namespace.yaml
+kubectl apply -f k8s-manifests/user-service.yaml
+kubectl apply -f k8s-manifests/product-service.yaml
+kubectl apply -f k8s-manifests/order-service.yaml
+kubectl apply -f k8s-manifests/frontend.yaml
+kubectl apply -f k8s-manifests/ingress.yaml
+kubectl apply -f k8s-manifests/network-policy.yaml
+```
+
+Or apply the whole Kustomize stack in one command:
+
+```bash
+kubectl apply -k k8s-manifests
+```
+
+Check results:
+
+```bash
+kubectl get ns
+kubectl get pods -n cloud-platform
+kubectl get svc -n cloud-platform
+kubectl get ingress -n cloud-platform
+```
+
+### 3. Apply the AWS infrastructure with Terraform
+
+This phase creates the VPC, EKS, RDS, Secrets Manager, ECR, and CloudFront resources.
+
+```bash
+Set-Location infrastructure/terraform
+terraform init
+terraform fmt -recursive
+terraform validate
+terraform plan -var-file="../environments/dev/terraform.tfvars"
+```
+
+If the plan looks correct, then apply it:
+
+```bash
+terraform apply -var-file="../environments/dev/terraform.tfvars"
+```
+
+Important: only run `terraform apply` after reviewing the plan and confirming the AWS account, region, networking, and cost profile are acceptable.
+
+### 4. Connect to the EKS cluster and deploy the app
+
+After the AWS infrastructure exists:
+
+```bash
+aws eks update-kubeconfig --region us-east-1 --name dev-cluster
+kubectl get nodes
+kubectl apply -k k8s-manifests
+kubectl get pods -n cloud-platform
+kubectl get ingress -n cloud-platform
+```
+
+The Ingress and ALB will only work once the AWS Load Balancer Controller and ACM certificate are configured.
+
+### 5. Enable the Jenkins DevSecOps pipeline
+
+Before enabling publishing, configure the required Jenkins credentials:
+
+```text
+aws-ecr-publisher
+gitops-write-token
+cosign-private-key
+```
+
+Then create or update the pipeline from [jenkins/Jenkinsfile](jenkins/Jenkinsfile). For a simple in-cluster Jenkins deployment, you can also apply [k8s-manifests/jenkins.yaml](k8s-manifests/jenkins.yaml).
+
+Recommended path:
+
+```text
+1. Keep PUBLISH_IMAGES=false
+2. Run scan-only builds
+3. Review Trivy output and image security reports
+4. Enable publishing after the results are approved
+5. Trigger the GitOps manifest update only when the ECR digest is valid
+```
+
+### 6. Apply Argo CD GitOps sync
+
+After cluster and repo access are ready:
+
+```bash
+kubectl apply -f k8s-manifests/argocd-app.yaml
+kubectl -n argocd get applications
+kubectl -n argocd get application cloud-platform
+```
+
+Expected state: `Synced` and `Healthy` once the ECR digests and cluster prerequisites are valid.
+
+### 7. Production-style verification checklist
+
+Run the following after every environment change:
+
+```bash
+pytest -q
+kubectl get pods -n cloud-platform
+kubectl get svc -n cloud-platform
+kubectl get ingress -n cloud-platform
+kubectl -n argocd get application cloud-platform
+```
+
+For local checks, confirm the frontend and service health endpoints before moving to AWS deployment.
+
 ## Project layout
 
 ```text
