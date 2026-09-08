@@ -10,6 +10,8 @@
 *.tfstate
 *.tfstate.*
 .terraform.tfstate.lock.info
+*.tfplan
+*.tfplan.*
 crash.log
 crash.*.log
 
