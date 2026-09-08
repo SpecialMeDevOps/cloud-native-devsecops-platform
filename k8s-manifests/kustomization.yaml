@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: cloud-platform
 resources:
   - namespace.yaml
+  - jenkins.yaml
   - user-service.yaml
   - product-service.yaml
   - order-service.yaml

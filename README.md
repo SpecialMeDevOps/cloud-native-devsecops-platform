@@ -244,6 +244,8 @@ gitops-write-token
 cosign-private-key
 ```
 
+For an in-cluster Jenkins instance, [jenkins.yaml](k8s-manifests/jenkins.yaml) provides a simple Deployment and Service with HTTP and agent ports plus readiness/liveness checks against `/login`.
+
 The `PUBLISH_IMAGES` parameter is intentionally false by default. Start with scans only, then enable publishing after reviewing the results.
 
 ### Phase 10: Argo CD GitOps
