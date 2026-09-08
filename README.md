@@ -52,6 +52,51 @@ project-root/
 └── LICENSE
 ```
 
+## Infrastructure and AWS roadmap
+
+This project includes both a local Docker Compose development environment and a Terraform-based AWS infrastructure plan. The implementation is intended to proceed in stages so the platform can be built safely and predictably.
+
+### Recommended project flow
+
+1. Run the project locally with Docker Compose
+2. Validate backend, frontend, and database services
+3. Design the AWS networking and EKS architecture
+4. Implement Terraform modules one by one
+5. Validate with `terraform validate` and `terraform plan`
+6. Review the AWS plan before `terraform apply`
+7. Deploy services to EKS
+8. Integrate RDS, ECR, S3, and CloudFront
+9. Add CI/CD automation and GitOps practices
+
+### Terraform implementation order
+
+```text
+networking -> eks -> rds -> ecr -> s3-cloudfront -> dynamodb
+```
+
+This order is important because EKS depends on VPC and subnet outputs, while RDS should live inside private networking.
+
+### Dev environment practices
+
+- Use `t3.medium` or similar small worker nodes for low cost
+- Use one NAT Gateway in dev to reduce cost
+- Keep the database small and private
+- Keep all resources tagged with Project, Environment, and ManagedBy
+
+### Quick Terraform commands
+
+```bash
+cd infrastructure/terraform
+terraform init
+terraform fmt -recursive
+terraform validate
+terraform plan -var-file="../environments/dev/terraform.tfvars"
+```
+
+### Important rule
+
+Do not apply Terraform until the plan is reviewed. This project is meant to be deployed in a controlled, step-by-step way.
+
 ## Notes
 
 This repository is intentionally structured as a functional starter rather than a full production AWS deployment. It gives you a working local baseline that mirrors the architecture described in the original design brief, while also including the IaC, GitOps, and pipeline scaffolding you would extend for EKS and AWS.
