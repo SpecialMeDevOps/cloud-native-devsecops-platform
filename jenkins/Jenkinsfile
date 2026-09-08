@@ -1,40 +1,168 @@
 pipeline {
   agent any
 
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+  }
+
+  parameters {
+    booleanParam(name: 'PUBLISH_IMAGES', defaultValue: false, description: 'Push images to ECR and update GitOps manifests')
+    booleanParam(name: 'SIGN_IMAGES', defaultValue: false, description: 'Sign pushed images with Cosign')
+    string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS region')
+    string(name: 'ECR_ENVIRONMENT', defaultValue: 'dev', description: 'Environment prefix used in ECR repository names')
+    string(name: 'AWS_CREDENTIALS_ID', defaultValue: 'aws-ecr-publisher', description: 'Jenkins AWS credentials ID')
+    string(name: 'GITOPS_TOKEN_CREDENTIALS_ID', defaultValue: 'gitops-write-token', description: 'Jenkins secret text credential for Git push')
+  }
+
   environment {
-    IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_ID}"
+    AWS_REGION = "${params.AWS_REGION}"
+    ECR_ENVIRONMENT = "${params.ECR_ENVIRONMENT}"
+    IMAGE_TAG = "sha-${env.BUILD_TAG}"
+    GITOPS_REPO = 'https://github.com/SpecialMeDevOps/Cloud-Native-Microservices-DevOps-Project.git'
   }
 
   stages {
     stage('Checkout') {
       steps {
-        echo 'Checking out source'
         checkout scm
       }
     }
 
-    stage('Build & Test') {
+    stage('Tests') {
       steps {
         sh 'python -m pytest services/user-service/tests services/product-service/tests services/order-service/tests -q'
       }
     }
 
-    stage('Security Scan') {
+    stage('Lint and quality') {
       steps {
-        echo 'Placeholder for Trivy/SonarQube scan'
+        sh '''
+          python -m compileall -q services
+          if command -v ruff >/dev/null 2>&1; then
+            ruff check services
+          else
+            echo "ruff is not installed on this agent; compileall and pytest remain required checks."
+          fi
+        '''
       }
     }
 
-    stage('Package') {
+    stage('Trivy SAST/SCA/secret scan') {
       steps {
-        echo 'Build Docker images and push to ECR'
+        sh 'trivy fs --scanners vuln,misconfig,secret --exit-code 1 --severity HIGH,CRITICAL .'
       }
     }
 
-    stage('Deploy') {
+    stage('Build images and SBOMs') {
       steps {
-        echo 'Update GitOps manifests and trigger ArgoCD sync'
+        sh '''
+          set -eu
+          for service in user-service product-service order-service; do
+            docker build --pull -t "$service:$IMAGE_TAG" "services/$service"
+          done
+          docker build --pull -t "frontend:$IMAGE_TAG" frontend
+          if command -v syft >/dev/null 2>&1; then
+            mkdir -p artifacts/sbom
+            for service in user-service product-service order-service frontend; do
+              syft "$service:$IMAGE_TAG" -o cyclonedx-json="artifacts/sbom/$service.json"
+            done
+          else
+            echo "syft is not installed; install it on the Jenkins agent to publish SBOMs."
+          fi
+        '''
       }
+    }
+
+    stage('Image vulnerability scan') {
+      steps {
+        sh '''
+          set -eu
+          for service in user-service product-service order-service frontend; do
+            trivy image --exit-code 1 --severity HIGH,CRITICAL "$service:$IMAGE_TAG"
+          done
+        '''
+      }
+    }
+
+    stage('Push images to ECR') {
+      when {
+        expression { params.PUBLISH_IMAGES }
+      }
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: params.AWS_CREDENTIALS_ID]]) {
+          sh '''
+            set -eu
+            AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+            ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+            aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+            for service in user-service product-service order-service frontend; do
+              docker tag "$service:$IMAGE_TAG" "$ECR_REGISTRY/$ECR_ENVIRONMENT/$service:$IMAGE_TAG"
+              docker push "$ECR_REGISTRY/$ECR_ENVIRONMENT/$service:$IMAGE_TAG"
+            done
+          '''
+        }
+      }
+    }
+
+    stage('Signing hook') {
+      when {
+        allOf {
+          expression { params.PUBLISH_IMAGES }
+          expression { params.SIGN_IMAGES }
+        }
+      }
+      steps {
+        withCredentials([string(credentialsId: 'cosign-private-key', variable: 'COSIGN_PRIVATE_KEY')]) {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: params.AWS_CREDENTIALS_ID]]) {
+            sh '''
+              set -eu
+              AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+              ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+              for service in user-service product-service order-service frontend; do
+                cosign sign --yes --key env://COSIGN_PRIVATE_KEY "$ECR_REGISTRY/$ECR_ENVIRONMENT/$service:$IMAGE_TAG"
+              done
+            '''
+          }
+        }
+      }
+    }
+
+    stage('GitOps manifest update') {
+      when {
+        expression { params.PUBLISH_IMAGES }
+      }
+      steps {
+        withCredentials([string(credentialsId: params.GITOPS_TOKEN_CREDENTIALS_ID, variable: 'GITOPS_TOKEN')]) {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: params.AWS_CREDENTIALS_ID]]) {
+            sh '''
+              set -eu
+              AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+              ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+              if ! command -v kustomize >/dev/null 2>&1; then
+                echo "kustomize is required for immutable GitOps image updates" >&2
+                exit 1
+              fi
+              for service in user-service product-service order-service frontend; do
+                digest="$(aws ecr describe-images --repository-name "$ECR_ENVIRONMENT/$service" --image-ids imageTag="$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text)"
+                (cd k8s-manifests && kustomize edit set image "$service=$ECR_REGISTRY/$ECR_ENVIRONMENT/$service@$digest")
+              done
+              git config user.name "Jenkins"
+              git config user.email "jenkins@localhost"
+              git add k8s-manifests/kustomization.yaml
+              git diff --cached --quiet || git commit -m "ci: promote ${IMAGE_TAG} images"
+              git remote set-url origin "https://x-access-token:${GITOPS_TOKEN}@github.com/SpecialMeDevOps/Cloud-Native-Microservices-DevOps-Project.git"
+              git push origin HEAD
+            '''
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: 'artifacts/sbom/*.json', allowEmptyArchive: true
     }
   }
 }

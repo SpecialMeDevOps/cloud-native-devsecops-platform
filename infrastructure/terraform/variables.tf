@@ -69,3 +69,52 @@ variable "node_max_size" {
   type        = number
   default     = 3
 }
+
+variable "rds_instance_class" {
+  description = "RDS instance class."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "rds_engine_version" {
+  description = "PostgreSQL engine version."
+  type        = string
+  default     = "16.4"
+}
+
+variable "rds_allocated_storage" {
+  description = "Initial RDS storage in GiB."
+  type        = number
+  default     = 20
+}
+
+variable "rds_database_name" {
+  description = "Initial PostgreSQL database name."
+  type        = string
+  default     = "platform"
+}
+
+variable "rds_master_username" {
+  description = "Initial PostgreSQL master username. The password is generated and stored in Secrets Manager."
+  type        = string
+  default     = "platform_admin"
+}
+
+variable "acm_certificate_arn" {
+  description = "Optional ACM certificate ARN for the CloudFront HTTPS alias and ALB ingress."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "cloudfront_aliases" {
+  description = "DNS aliases for CloudFront. Leave empty when no custom certificate is configured."
+  type        = list(string)
+  default     = []
+}
+
+variable "cloudfront_price_class" {
+  description = "CloudFront price class."
+  type        = string
+  default     = "PriceClass_100"
+}

@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cloud-platform
+resources:
+  - namespace.yaml
+  - user-service.yaml
+  - product-service.yaml
+  - order-service.yaml
+  - frontend.yaml
+  - ingress.yaml
+  - network-policy.yaml
+
+# CI replaces these zero digests with the digest returned by ECR. Digests are
+# immutable and intentionally used instead of the mutable :latest tag.
+images:
+  - name: user-service
+    newName: REPLACE_WITH_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/dev/user-service
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: product-service
+    newName: REPLACE_WITH_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/dev/product-service
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: order-service
+    newName: REPLACE_WITH_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/dev/order-service
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: frontend
+    newName: REPLACE_WITH_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/dev/frontend
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

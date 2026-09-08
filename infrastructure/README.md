@@ -1,6 +1,6 @@
 # Infrastructure and AWS Deployment Guide
 
-This folder contains the Terraform IaC for the AWS-based cloud architecture of the Cloud Native DevSecOps Platform. It is designed to complement the local Docker Compose setup and eventually provision a production-ready AWS environment for EKS, RDS, ECR, S3, CloudFront, and DynamoDB.
+This folder contains production-oriented Terraform modules for the AWS-based cloud architecture. The code is intentionally declarative: this repository does not contain AWS credentials and no deployment is performed by validation or CI.
 
 ## Current project structure
 
@@ -37,15 +37,26 @@ The Terraform code should eventually provision:
 - DynamoDB table (schema to be finalized)
 - DevOps-ready tagging, least-privilege IAM, and environment-specific defaults
 
-## Step-by-step implementation roadmap
+## Phases 2-10 implemented
 
-### 1. Prerequisites
+The root stack now wires networking and EKS to:
+
+- private, encrypted, Multi-AZ PostgreSQL RDS with generated credentials in Secrets Manager
+- immutable, scan-on-push ECR repositories with lifecycle policies
+- a private versioned S3 frontend bucket and CloudFront Origin Access Control
+- root variables and outputs for database, registry, and CDN integration
+
+Kubernetes manifests include a frontend, AWS Load Balancer Controller ingress, immutable digest placeholders, service hardening, and NetworkPolicies. Replace the zero digests and `${ACM_CERTIFICATE_ARN}` in an environment-specific promotion workflow; never commit credentials or certificate private keys.
+
+## Prerequisites and validation
 
 Before you run Terraform, make sure the following are ready:
 
 - AWS account with permissions to create VPC, EKS, RDS, IAM, S3, CloudFront, etc.
 - AWS CLI installed and configured
 - Terraform installed (version >= 1.6)
+- kubectl and the AWS Load Balancer Controller installed for a real EKS rollout
+- an ACM certificate in `us-east-1` when using CloudFront aliases; the ALB certificate must be in the ALB region
 - An AWS profile or environment variables set:
 
 ```bash
@@ -56,7 +67,7 @@ export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=us-east-1
 ```
 
-### 2. Configure environment values
+### Configure environment values
 
 Use the environment tfvars file for dev defaults:
 
@@ -69,11 +80,16 @@ availability_zones = ["us-east-1a", "us-east-1b"]
 public_subnet_cidrs = ["10.10.1.0/24", "10.10.2.0/24"]
 private_subnet_cidrs = ["10.10.11.0/24", "10.10.12.0/24"]
 single_nat_gateway = true
+rds_instance_class = "db.t4g.micro"
+rds_database_name = "platform"
+rds_master_username = "platform_admin"
+# acm_certificate_arn = "arn:aws:acm:us-east-1:..."
+# cloudfront_aliases = ["platform.example.com"]
 ```
 
 Keep dev cost-conscious by using smaller instance sizes and single NAT gateway.
 
-### 3. Initialize Terraform
+### Initialize Terraform
 
 From the Terraform directory:
 
@@ -82,7 +98,7 @@ cd infrastructure/terraform
 terraform init
 ```
 
-### 4. Validate syntax and dependencies
+### Validate syntax and dependencies
 
 ```bash
 terraform fmt -recursive
@@ -91,7 +107,7 @@ terraform validate
 
 This confirms the modules are syntactically valid before creating AWS resources.
 
-### 5. Review the plan before apply
+### Review the plan before apply
 
 ```bash
 terraform plan -var-file="../environments/dev/terraform.tfvars"
@@ -103,7 +119,7 @@ Important:
 - Check for unexpected VPC CIDRs, region choices, or resource counts
 - Make sure NAT Gateway and EKS node sizing match your budget
 
-### 6. Implement each module in order
+### Module order
 
 The correct order for implementation is:
 
@@ -116,7 +132,7 @@ The correct order for implementation is:
 
 This order matters because EKS depends on networking subnets and RDS depends on the VPC/private subnet layout.
 
-### 7. Module responsibilities
+### Module responsibilities
 
 #### networking
 
@@ -191,6 +207,10 @@ After the Terraform stack is complete, the next phases are:
 - set up CI/CD pipeline for image builds and deployments
 - harden security with IAM, vulnerability scanning, and GitOps workflow
 
+## Phase 11: manual verification only
+
+Phase 11 is deliberately not automated here. An operator must supply AWS credentials, review a Terraform plan, and verify `kubectl` access to the intended cluster before any apply or Argo CD sync. Then verify EKS nodes, the RDS secret mount, ECR image pulls, ALB HTTPS health, and CloudFront content. Do not treat `terraform validate`, pytest, or client-side manifest checks as evidence that AWS resources were deployed.
+
 ## Recommended execution order for this project
 
 ```text
@@ -206,12 +226,13 @@ After the Terraform stack is complete, the next phases are:
 10. Implement S3 + CloudFront module
 11. Implement DynamoDB module
 12. Review final plan
-13. terraform apply (manual, after approval)
-14. Deploy application workloads
+13. Phase 11: manual AWS credentials and plan review
+14. terraform apply (manual, after approval)
+15. Deploy application workloads and verify with kubectl
 ```
 
 ## Notes
 
 - Do not run `terraform apply` until the plan is reviewed.
 - The dev environment should remain low-cost by default.
-- The current implementation is a scaffold and should be completed module by module before production use.
+- Terraform validation and local tests are safe pre-deployment checks; they do not create or destroy resources.

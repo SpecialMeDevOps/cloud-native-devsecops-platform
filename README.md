@@ -1,12 +1,13 @@
 # Cloud Native DevSecOps Platform
 
-This repository is a starter implementation aligned to the architecture described in the attached project brief. It focuses on a working local development stack that demonstrates:
+This repository is a local development stack plus production-oriented AWS/EKS IaC. It demonstrates:
 
 - a microservice-based backend
 - a static frontend dashboard
 - local container orchestration with Docker Compose
 - CI/CD and GitOps starter files for AWS EKS deployment
 - DevSecOps practices and Kubernetes manifests
+- Terraform modules for RDS/Secrets Manager, ECR, S3/CloudFront OAC, networking, and EKS
 
 ## Included components
 
@@ -95,7 +96,9 @@ terraform plan -var-file="../environments/dev/terraform.tfvars"
 
 ### Important rule
 
-Do not apply Terraform until the plan is reviewed. This project is meant to be deployed in a controlled, step-by-step way.
+These commands only format and validate configuration (and optionally create a plan). Do not run `terraform apply` or `terraform destroy` from this repository without a manually reviewed plan and approved AWS credentials. Phase 11 requires manual AWS credential and `kubectl` verification; no deployment is claimed by this project.
+
+Kubernetes image manifests use immutable digest placeholders. CI replaces them with digests from ECR and Argo CD syncs the committed GitOps state. Set the ACM certificate annotation through an environment promotion process; do not commit secrets.
 
 ## Notes
 

@@ -22,7 +22,33 @@ module "eks" {
 }
 
 module "rds" {
-  source      = "./modules/rds"
+  source                     = "./modules/rds"
+  environment                = var.environment
+  subnet_ids                 = module.networking.private_subnet_ids
+  vpc_id                     = module.networking.vpc_id
+  allowed_security_group_ids = [module.eks.node_security_group_id]
+  instance_class             = var.rds_instance_class
+  engine_version             = var.rds_engine_version
+  allocated_storage          = var.rds_allocated_storage
+  database_name              = var.rds_database_name
+  master_username            = var.rds_master_username
+}
+
+module "ecr" {
+  source      = "./modules/ecr"
   environment = var.environment
-  subnet_ids  = module.networking.private_subnet_ids
+  repository_names = [
+    "user-service",
+    "product-service",
+    "order-service",
+    "frontend",
+  ]
+}
+
+module "s3_cloudfront" {
+  source              = "./modules/s3-cloudfront"
+  environment         = var.environment
+  cloudfront_aliases  = var.cloudfront_aliases
+  acm_certificate_arn = var.acm_certificate_arn
+  price_class         = var.cloudfront_price_class
 }
